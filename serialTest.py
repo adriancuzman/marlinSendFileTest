@@ -48,8 +48,8 @@ if ser.isOpen():
         done = False
         while True:
             response = ser.readline()
-            print("rec: " + response)
-            print("rec: " + ":".join("{:02x}".format(ord(c)) for c in response))
+            print("rsp: " + response)
+            #print("rec: " + ":".join("{:02x}".format(ord(c)) for c in response))
 
             if ("SD card ok" in response):
                 ser.write("M28 "+ sys.argv[3]+"\n")
@@ -62,7 +62,13 @@ if ser.isOpen():
                         if (numOfLines % 100 == 0):
                            sys.stdout.write(".")
                            sys.stdout.flush()
-                        ser.write(line)
+                        command_to_send = "N" + str(numOfLines) + " " + line.rstrip()
+                        checksum = 0
+                        for c in bytearray(command_to_send):
+			                checksum ^= c
+                        command_to_send = command_to_send + "*" + str(checksum)+"\n"
+                        print(command_to_send)
+                        ser.write(command_to_send)                                     
                         if ser.in_waiting > 0:
                            inByte = ser.read(1)
                            if ord(inByte[0]) == 19:
