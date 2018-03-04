@@ -1,7 +1,8 @@
 #!/usr/bin/python
 
-import serial, time, sys, time
+import serial, time, sys, time, re
 #initialization and open the port
+
 
 if not len(sys.argv) == 4:
    print "Usage: serialTest port baudrate fileNameToSend"
@@ -9,6 +10,10 @@ if not len(sys.argv) == 4:
    exit()
 
 current_milli_time = lambda: int(round(time.time() * 1000))
+
+regex_int_pattern = "\d+"
+regex_resend_linenumber = re.compile("(N|N:)?(?P<n>%s)" % regex_int_pattern)
+"""Regex to use for request line numbers in resend requests"""
 
 #possible timeout values:
 #    1. None: wait forever, block call
@@ -30,6 +35,8 @@ ser.xonxoff = False     #disable software flow control
 ser.rtscts = False     #disable hardware (RTS/CTS) flow control
 ser.dsrdtr = False       #disable hardware (DSR/DTR) flow control
 ser.writeTimeout = 2     #timeout for write
+
+deltaTime = 0
 
 try: 
     ser.open()
@@ -57,33 +64,55 @@ if ser.isOpen():
             if ("Writing to file:" in response):
                 with open(sys.argv[3]) as f:
                     startTime = current_milli_time()
-                    for line in f:
+                    fileContent = f.readlines()
+                    while numOfLines < len(fileContent):
                         numOfLines += 1
+                        
                         if (numOfLines % 100 == 0):
                            sys.stdout.write(".")
                            sys.stdout.flush()
+                        
+                        line = fileContent[numOfLines - 1]
                         command_to_send = "N" + str(numOfLines) + " " + line.rstrip()
                         checksum = 0
                         for c in bytearray(command_to_send):
 			                checksum ^= c
                         command_to_send = command_to_send + "*" + str(checksum)+"\n"
-                        print(command_to_send)
+                        #print(command_to_send)
                         ser.write(command_to_send)                                     
+                        
                         if ser.in_waiting > 0:
-                           inByte = ser.read(1)
-                           if ord(inByte[0]) == 19:
-                              while True:
-                                    inByte = ser.read(1)
-                                    if ord(inByte[0]) == 17:
-                                       break;
-                    ser.flushOutput()
+                            inBytes = ser.readline()
+                            if chr(19) in inBytes:
+                                while True:
+                                    inBytes = ser.readline()
+                                    if "Error" in inBytes:
+                                        print(inBytes)
+                                    if chr(17) in inBytes:
+                                       break
+                            if inBytes.startswith('resend'):
+                                match = regex_resend_linenumber.search(inBytes)
+                                if match is not None:
+		                            numOfLines = int(match.group("n"))
+                                            print("Resending "+str(numOfLines))
+                            if "Error" in inBytes:
+                                print(inBytes)
+
+                    #ser.flushOutput()
                     endTime = current_milli_time()
                     deltaTime = endTime - startTime
-                    print("Done in ")
-                    print(deltaTime)
+                    
+                    numOfLines += 1
                     print("Sending M29")
-                    ser.write("M29 \n")
+                    command_to_send = "N" + str(numOfLines) + " M29"
+                    checksum = 0
+                    for c in bytearray(command_to_send):
+			            checksum ^= c
+                    command_to_send = command_to_send + "*" + str(checksum)+"\n"
+                    ser.write(command_to_send)
+
             if ("Done saving file." in response):
+                print("Done in "+str(deltaTime)+"ms")
                 break
         ser.flushOutput()    
         ser.close()            
